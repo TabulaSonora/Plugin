@@ -136,7 +136,19 @@ jobs:
           KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
           P12="$RUNNER_TEMP/certificate.p12"
           trap 'rm -f "$P12"' EXIT
-          printf '%s' "$MACOS_CERTIFICATE_P12" | base64 --decode > "$P12"
+
+          # The two ways the secrets arrive half-made, named before `security` gets to say
+          # "Unable to decode the provided data" about either of them.
+          if [ -z "$MACOS_CERTIFICATE_PASSWORD" ]; then
+              echo "::error::MACOS_CERTIFICATE_P12 is set but MACOS_CERTIFICATE_PASSWORD is empty. Both are needed; set the password the .p12 was exported with."
+              exit 1
+          fi
+          if ! printf '%s' "$MACOS_CERTIFICATE_P12" | base64 --decode > "$P12" 2>/dev/null \
+             || ! openssl pkcs12 -in "$P12" -passin "pass:$MACOS_CERTIFICATE_PASSWORD" -noout -legacy 2>/dev/null \
+             && ! openssl pkcs12 -in "$P12" -passin "pass:$MACOS_CERTIFICATE_PASSWORD" -noout 2>/dev/null; then
+              echo "::error::MACOS_CERTIFICATE_P12 does not decode to a PKCS#12 file that opens with MACOS_CERTIFICATE_PASSWORD. Set it to the output of: base64 -i DeveloperID.p12 | pbcopy"
+              exit 1
+          fi
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
