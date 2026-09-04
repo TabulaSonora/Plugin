@@ -17,7 +17,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ART="$ROOT/build/universal/TSPlug_artefacts/RelWithDebInfo"
 OUT="$ROOT/build/release-out"
 IDENTITY="${TSPLUG_SIGN_IDENTITY:-Developer ID Application}"
-VERSION="$(sed -nE 's/^\s*VERSION ([0-9.]+)$/\1/p' "$ROOT/CMakeLists.txt" | head -1)"
+VERSION="$(sed -nE 's/^[[:space:]]*VERSION ([0-9.]+)$/\1/p' "$ROOT/CMakeLists.txt" | head -1)"
 ENTITLEMENTS="$ROOT/tools/hardened.entitlements"
 
 [[ -d "$ART" ]] || { echo "No universal build at $ART; run: cmake --preset universal && cmake --build --preset universal" >&2; exit 1; }
