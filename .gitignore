@@ -1,0 +1,19 @@
+# Build trees
+build/
+build-*/
+.cache/
+CMakeUserPresets.json
+compile_commands.json
+
+# Nothing Roland-derived is ever committed: the ROM is supplied by the user, and renders of it are
+# derived from it.
+*.dll
+*.DLL
+*.wav
+
+# Editors and OS
+.DS_Store
+.vscode/
+.idea/
+*.xcuserstate
+xcuserdata/
