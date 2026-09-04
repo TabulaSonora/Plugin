@@ -21,8 +21,8 @@ choosing it is the permission.
 Needs CMake 3.24+, a C++20 compiler, and on macOS Xcode. Dependencies are submodules.
 
 ```sh
-git clone --recurse-submodules https://github.com/losnoco/TSPlug.git
-cd TSPlug
+git clone --recurse-submodules https://github.com/TabulaSonora/Plugin.git
+cd Plugin
 cmake --preset debug
 cmake --build --preset debug
 ctest --preset debug          # set TS_SCCORE_DLL to run the loaded-ROM half
