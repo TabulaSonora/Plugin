@@ -12,13 +12,38 @@
 # staples nothing inside it, so every bundle is stapled first and then packed.
 set -euo pipefail
 
+# Environment, for CI:
+#   TSPLUG_SIGN_IDENTITY   the codesign identity; `-` for an ad-hoc signature (unsigned build)
+#   TSPLUG_NOTARY_KEY      path to an App Store Connect .p8, with TSPLUG_NOTARY_KEY_ID and
+#                          TSPLUG_NOTARY_ISSUER, instead of the keychain profile
+#   TSPLUG_SKIP_NOTARISE   set to 1 to sign and pack without submitting to Apple
+#   TSPLUG_BUILD_DIR       the configured build tree (default build/universal)
+#   TSPLUG_ARCH_LABEL      what the DMG name says about the architecture (default universal)
 PROFILE="${1:-TabulaSonora}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ART="$ROOT/build/universal/TSPlug_artefacts/RelWithDebInfo"
+BUILD="${TSPLUG_BUILD_DIR:-$ROOT/build/universal}"
+ART="$BUILD/TSPlug_artefacts/RelWithDebInfo"
 OUT="$ROOT/build/release-out"
 IDENTITY="${TSPLUG_SIGN_IDENTITY:-Developer ID Application}"
+ARCH="${TSPLUG_ARCH_LABEL:-universal}"
 VERSION="$(sed -nE 's/^[[:space:]]*VERSION ([0-9.]+)$/\1/p' "$ROOT/CMakeLists.txt" | head -1)"
 ENTITLEMENTS="$ROOT/tools/hardened.entitlements"
+
+# An ad-hoc signature has no certificate to timestamp, and nothing Apple would notarise.
+ADHOC=0
+if [[ "$IDENTITY" == "-" ]]; then
+    ADHOC=1
+fi
+NOTARISE=1
+if [[ "$ADHOC" == 1 || "${TSPLUG_SKIP_NOTARISE:-0}" == 1 ]]; then
+    NOTARISE=0
+fi
+NOTARY_ARGS=()
+if [[ -n "${TSPLUG_NOTARY_KEY:-}" ]]; then
+    NOTARY_ARGS=(--key "$TSPLUG_NOTARY_KEY" --key-id "$TSPLUG_NOTARY_KEY_ID" --issuer "$TSPLUG_NOTARY_ISSUER")
+else
+    NOTARY_ARGS=(--keychain-profile "$PROFILE")
+fi
 
 [[ -d "$ART" ]] || { echo "No universal build at $ART; run: cmake --preset universal && cmake --build --preset universal" >&2; exit 1; }
 
@@ -28,7 +53,14 @@ cp -R "$ART/Standalone/Tabula Sonora.app" "$ART/VST3/Tabula Sonora.vst3" "$ART/A
 cp "$ROOT/LICENSE" "$ROOT/NOTICE.md" "$ROOT/README.md" "$OUT/stage/"
 
 sign() {
-    codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$@"
+    if [[ "$ADHOC" == 1 ]]; then
+        codesign --force --options runtime --entitlements "$ENTITLEMENTS" --sign - "$@"
+    else
+        codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$@"
+    fi
+}
+notarise() {
+    xcrun notarytool submit "$1" "${NOTARY_ARGS[@]}" --wait
 }
 
 echo "== signing"
@@ -40,30 +72,41 @@ for bundle in "$OUT/stage/Tabula Sonora.vst3" "$OUT/stage/Tabula Sonora.componen
 done
 sign "$OUT/stage/Tabula Sonora.lv2/libTabula Sonora.so"
 
-echo "== notarising the bundles"
-# One zip per bundle so a failure names the format. The LV2 dylib rides in its own zip; it cannot
-# be stapled, so hosts check its ticket online, which is what Apple does for bare dylibs anyway.
-mkdir -p "$OUT/zips"
-for item in "Tabula Sonora.vst3" "Tabula Sonora.component" "Tabula Sonora.clap" "Tabula Sonora.app" "Tabula Sonora.lv2"; do
-    zip="$OUT/zips/${item// /-}.zip"
-    ditto -c -k --keepParent "$OUT/stage/$item" "$zip"
-    xcrun notarytool submit "$zip" --keychain-profile "$PROFILE" --wait
-done
-for bundle in "Tabula Sonora.vst3" "Tabula Sonora.component" "Tabula Sonora.clap" "Tabula Sonora.app"; do
-    xcrun stapler staple "$OUT/stage/$bundle"
-done
+if [[ "$NOTARISE" == 1 ]]; then
+    echo "== notarising the bundles"
+    # One zip per bundle so a failure names the format. The LV2 dylib rides in its own zip; it
+    # cannot be stapled, so hosts check its ticket online, which is what Apple does for bare
+    # dylibs anyway.
+    mkdir -p "$OUT/zips"
+    for item in "Tabula Sonora.vst3" "Tabula Sonora.component" "Tabula Sonora.clap" "Tabula Sonora.app" "Tabula Sonora.lv2"; do
+        zip="$OUT/zips/${item// /-}.zip"
+        ditto -c -k --keepParent "$OUT/stage/$item" "$zip"
+        notarise "$zip"
+    done
+    for bundle in "Tabula Sonora.vst3" "Tabula Sonora.component" "Tabula Sonora.clap" "Tabula Sonora.app"; do
+        xcrun stapler staple "$OUT/stage/$bundle"
+    done
+else
+    echo "== not notarising (${ADHOC:+ad-hoc signature})"
+fi
 
 echo "== packing"
-DMG="$OUT/TabulaSonora-Plugin-$VERSION.dmg"
+DMG="$OUT/TabulaSonora-Plugin-$VERSION-macos-$ARCH.dmg"
 hdiutil create -volname "Tabula Sonora $VERSION" -srcfolder "$OUT/stage" -ov -format UDZO "$DMG" >/dev/null
 sign "$DMG"
-xcrun notarytool submit "$DMG" --keychain-profile "$PROFILE" --wait
-xcrun stapler staple "$DMG"
+if [[ "$NOTARISE" == 1 ]]; then
+    notarise "$DMG"
+    xcrun stapler staple "$DMG"
+fi
 
 echo "== verifying"
-spctl -a -vv -t install "$DMG"
 for bundle in "Tabula Sonora.vst3" "Tabula Sonora.component" "Tabula Sonora.clap" "Tabula Sonora.app"; do
     codesign --verify --deep --strict --verbose=1 "$OUT/stage/$bundle"
-    xcrun stapler validate "$OUT/stage/$bundle" | tail -1
+    if [[ "$NOTARISE" == 1 ]]; then
+        xcrun stapler validate "$OUT/stage/$bundle" | tail -1
+    fi
 done
+if [[ "$NOTARISE" == 1 ]]; then
+    spctl -a -vv -t install "$DMG"
+fi
 echo "$DMG"
