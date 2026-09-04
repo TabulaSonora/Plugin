@@ -88,6 +88,16 @@ void RomLoader::run()
                 result.state = request->size() == 1 ? State::failed : State::none;
                 result.file = candidate.file;
                 result.message = juce::String{error.what()};
+
+                // A copy another application imported sits in that application's container, and
+                // macOS asks before letting a second process read it -- or refuses outright. Say
+                // so rather than quoting an errno, and leave the file as the picker's starting
+                // point: choosing it there is the grant.
+                if (result.message.startsWith("Cannot open")
+                    && candidate.file.getFullPathName().contains("Group Containers")) {
+                    result.message = "macOS did not let this plugin read " + candidate.source
+                                     + "'s copy of SCCore.dll. Choose the file to allow it.";
+                }
             }
         }
         publish(result);

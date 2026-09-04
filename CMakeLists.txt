@@ -85,7 +85,20 @@ target_sources(TSPlug PRIVATE
     Source/plugin/Parameters.cpp
     Source/plugin/RomLocator.cpp
     Source/plugin/RomLoader.cpp
-    Source/plugin/PluginProcessor.cpp)
+    Source/plugin/PluginProcessor.cpp
+    Source/plugin/PluginEditor.cpp
+    Source/ui/LSFonts.cpp
+    Source/ui/LSLookAndFeel.cpp
+    Source/ui/LSComponents.cpp
+    Source/ui/LSMotion.cpp
+    Source/ui/LSPartGrid.cpp
+    Source/ui/HeaderPanel.cpp
+    Source/ui/SettingsPanel.cpp)
+
+if(APPLE)
+    # Reduce-motion comes from AppKit, so that one function lives in an Objective-C++ file.
+    target_sources(TSPlug PRIVATE Source/ui/LSMotion.mm)
+endif()
 
 target_include_directories(TSPlug PRIVATE Source)
 

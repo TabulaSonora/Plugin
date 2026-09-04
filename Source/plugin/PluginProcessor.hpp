@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RomLoader.hpp"
+#include "UserSettings.hpp"
 #include "engine/Instrument.hpp"
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -63,6 +64,7 @@ private:
     void applySettings();
     void loadRomFromKnownPlaces();
 
+    SharedUserSettings settings_;
     Instrument instrument_;
     juce::AudioProcessorValueTreeState parameters_;
     RomLoader romLoader_;

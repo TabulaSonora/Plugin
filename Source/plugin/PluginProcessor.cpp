@@ -1,10 +1,12 @@
 #include "PluginProcessor.hpp"
 
 #include "Parameters.hpp"
+#include "PluginEditor.hpp"
 #include "RomLocator.hpp"
 
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include <algorithm>
 #include <span>
 
 namespace tsplug {
@@ -26,6 +28,13 @@ PluginProcessor::PluginProcessor()
         parameters_.addParameterListener(id, this);
     }
     instrument_.setSettings(params::settingsFrom(parameters_));
+
+    // Whatever loads gets remembered, so the next instance -- in this host or another -- finds it
+    // without asking. Verified means the whole file was hashed at some point: either just now,
+    // or by whoever marked the candidate before it was picked up.
+    romLoader_.onLoaded = [this](const RomLoader::Status& status) {
+        settings_->rememberRom(status.file, true);
+    };
 
     // A host restores state moments after construction; when it does, the session's own ROM is
     // tried first. Until then, or when it does not, the discovery chain runs on its own.
@@ -128,7 +137,7 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
 
 juce::AudioProcessorEditor* PluginProcessor::createEditor()
 {
-    return new juce::GenericAudioProcessorEditor{*this};
+    return new PluginEditor{*this};
 }
 
 // -- Parameters ----------------------------------------------------------------------------------
@@ -181,14 +190,28 @@ bool PluginProcessor::isPartSoloed(int part) const noexcept
 
 void PluginProcessor::loadRomFromKnownPlaces()
 {
-    romLoader_.loadFirstOf(romCandidates(sessionRom_, sessionRomVerified_));
+    const auto remembered = settings_->rememberedRom();
+    auto candidates = romCandidates(remembered.file, remembered.verified);
+
+    // The session's own ROM outranks the user's last one: a project saved against a particular
+    // build should reopen against it.
+    if (sessionRom_.existsAsFile()) {
+        candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
+                                        [this](const RomCandidate& c) { return c.file == sessionRom_; }),
+                         candidates.end());
+        candidates.insert(candidates.begin(), RomCandidate{sessionRom_, sessionRomVerified_, "session"});
+    }
+    romLoader_.loadFirstOf(std::move(candidates));
 }
 
 void PluginProcessor::chooseRom()
 {
-    auto start = juce::File::getSpecialLocation(juce::File::userHomeDirectory);
+    auto start = settings_->lastRomDirectory();
     if (const auto current = romLoader_.status().file; current.existsAsFile()) {
         start = current.getParentDirectory();
+    }
+    if (!start.isDirectory()) {
+        start = juce::File::getSpecialLocation(juce::File::userHomeDirectory);
     }
 
     chooser_ = std::make_unique<juce::FileChooser>("Choose SCCore.dll from a Sound Canvas VA install",
