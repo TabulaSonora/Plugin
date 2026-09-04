@@ -27,6 +27,13 @@ else
 fi
 cp "$ROOT/LICENSE" "$ROOT/NOTICE.md" "$ROOT/README.md" "$OUT/$NAME/"
 
+# RelWithDebInfo leaves the debug info in every ELF, and there are four copies of the engine
+# here: stripped they are a fifth of the size. MSVC keeps its symbols in separate .pdb files that
+# are never copied, so Windows has nothing to strip.
+if [[ "$PLATFORM" == linux ]]; then
+    find "$OUT/$NAME" -type f \( -name '*.so' -o -name 'Tabula Sonora' \) -exec strip --strip-unneeded {} +
+fi
+
 cd "$OUT"
 if [[ "$PLATFORM" == windows ]]; then
     cmake -E tar cf "$NAME.zip" --format=zip "$NAME"
